@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "Hover Image Zoom",
+  "version": "1.0.0",
+  "description": "Hover any element: Alt+X/Alt+Z to zoom continuously, Ctrl+Shift+X/Z to snap zoom to integer levels, Alt+C to snap to native resolution, Alt+V to toggle nearest-neighbor scaling, Alt+S to reset to original size.",
+  "permissions": ["storage"],
+  "options_page": "options.html",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Hover Image Zoom"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ]
+}
