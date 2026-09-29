@@ -21,8 +21,11 @@ All shortcuts act on whichever element is currently under your mouse cursor — 
 | **Alt+C** | Snap to 100% of the element's actual file resolution — only works on `<img>`, `<video>`, and `<canvas>`, which are the only elements with a "native" pixel size |
 | **Alt+V** | Toggle nearest-neighbor (`image-rendering: pixelated`) scaling on/off |
 | **Alt+S** | Reset the element back to its original (100%) size |
+| **Alt+A** | Toggle "fill the page" fullscreen — the element expands to cover the whole viewport, staying there regardless of scroll |
 
 Each element keeps its own zoom level and rendering mode independently, tracked as long as it stays on the page. Zooming a large container (like a whole `<div>` or the page body) works too, but can get visually intense fast — Alt+S is there to snap it right back.
+
+Alt+A is a page-level fullscreen, not the browser's actual Fullscreen API — it doesn't hide browser chrome or take over the OS, it just makes the hovered element (a video, most usefully) fill the browser's content area, above everything else on the page, with its aspect ratio preserved. It's built on the same floating mechanism as zooming, so it works on any element, though it's mainly useful for video and images. Pressing any of the zoom shortcuts while in this mode exits it and resumes normal scaling; Alt+A again or Alt+S also exits it.
 
 ## Toolbar icon
 Clicking the extension's icon (pin it via the puzzle-piece menu for quick access) opens a small popup listing the current shortcuts, plus a button to open full settings. The icon isn't required for the extension to work — shortcuts and the content script run on every page regardless of whether it's pinned or clicked.
@@ -41,8 +44,12 @@ If two actions end up sharing the same combination, the options page flags it �
 3. **Check for a system-wide hotkey conflict**, especially for `Alt+Z`: if you have an NVIDIA GPU with GeForce Experience or the NVIDIA app installed, `Alt+Z` is its default overlay hotkey and gets intercepted before Chrome (or any app) ever sees it — no extension can override this. Test by pressing `Alt+Z` in a plain text field like Notepad; if nothing happens there either, it's being swallowed at the OS level, not by this extension. You can either remap/disable that shortcut in the NVIDIA app's Settings → General → In-Game Overlay, or let me know and I can change this extension's shortcuts to something less contested (e.g. bracket keys or a Ctrl+Alt combo).
 4. A small toast in the bottom-right corner of the page confirms each action fired (e.g. "Zoom: 130%" or "no image under cursor") — useful for telling apart "the shortcut didn't register" from "it registered, but you weren't hovering an image."
 
+## How zooming avoids getting clipped
+When you zoom something past 100%, the extension temporarily lifts the actual element out of the page and floats it in a full-viewport overlay layer (leaving an invisible placeholder behind so nothing else on the page shifts). That's what lets it grow past its parent container's edges and sit above everything else, instead of getting cut off by a parent with `overflow: hidden` or hidden behind neighboring elements — which is the usual reason an image looks like it "isn't scaling" in a gallery or thumbnail grid. The floating copy tracks page scroll, so it stays anchored over its original spot. Alt+S (or zooming back down to 1x) puts the element right back where it came from.
+
 ## Notes / limitations
-- Zoom is applied via CSS `transform: scale()` on the image element itself, so it can occasionally get visually clipped by a parent container with `overflow: hidden`. The extension bumps the image's `z-index` while zoomed to reduce this, but it can't fix every page's layout.
 - Minimum zoom is 0.1x; there's no hard maximum.
+- Because the element is moved to sit at the very end of `<html>` while zoomed, it can lose CSS that was inherited from its original parent context (e.g. a locally-scoped color or font set higher up the page) — rare in practice for images/video/most divs, but worth knowing.
+- Interactive elements (video, canvas, embedded players) keep their actual state while floating since the real element is moved, not a copy — but zooming something like a `<table>` row or list item can occasionally look odd, since the placeholder left behind isn't guaranteed to preserve unusual layout roles perfectly.
 - Shortcuts are ignored while typing in a text field, textarea, or contenteditable element.
 - Shortcuts use physical key codes (not the character produced), so they behave consistently even on keyboard layouts where Alt/Option remaps letters (e.g. macOS).

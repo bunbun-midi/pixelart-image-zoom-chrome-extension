@@ -10,6 +10,7 @@
 //   Alt+C                 snap to 100% of the element's actual (natural) file resolution (images/video/canvas only)
 //   Alt+V                 toggle nearest-neighbor (pixelated) scaling
 //   Alt+S                 reset the element back to its original (100%) size
+//   Alt+A                 toggle "fill the page" fullscreen (in-page, not the OS Fullscreen API)
 (function () {
   if (window.__hoverImageZoomInstalled) return;
   window.__hoverImageZoomInstalled = true;
@@ -30,6 +31,7 @@
     snapNative: { code: "KeyC", ctrl: false, alt: true, shift: false, meta: false },
     toggleNearest: { code: "KeyV", ctrl: false, alt: true, shift: false, meta: false },
     resetSize: { code: "KeyS", ctrl: false, alt: true, shift: false, meta: false },
+    pageFullscreen: { code: "KeyA", ctrl: false, alt: true, shift: false, meta: false },
   };
 
   function mergeHotkeys(stored) {
@@ -98,7 +100,7 @@
   function getState(el) {
     let s = stateMap.get(el);
     if (!s) {
-      s = { scale: 1, nearest: false };
+      s = { scale: 1, nearest: false, pageFull: false };
       stateMap.set(el, s);
     }
     return s;
@@ -108,29 +110,162 @@
     return Math.round(n * 100) / 100;
   }
 
+  // ---- Floating layer: lets a zoomed element escape ancestor overflow/
+  // clipping and stacking context, by temporarily reparenting the *actual*
+  // element (not a clone, so video/canvas/listeners keep working) into a
+  // full-viewport overlay, leaving an invisible same-size placeholder behind
+  // so the page layout doesn't jump.
+  let zoomLayer = null;
+
+  function ensureZoomLayer() {
+    if (zoomLayer && zoomLayer.isConnected) return zoomLayer;
+    zoomLayer = document.createElement("div");
+    zoomLayer.id = "__hover-image-zoom-layer__";
+    zoomLayer.style.cssText = [
+      "position:fixed", "inset:0", "pointer-events:none",
+      "z-index:2147483647", "overflow:visible",
+    ].join(";");
+    document.documentElement.appendChild(zoomLayer);
+    return zoomLayer;
+  }
+
+  const FLOAT_STYLE_PROPS = [
+    "position", "left", "top", "width", "height",
+    "margin", "marginLeft", "marginTop", "marginRight", "marginBottom",
+    "pointerEvents", "objectFit",
+  ];
+
+  const floatMap = new WeakMap(); // el -> { placeholder, prevStyle, pageLeft, pageTop, width, height }
+  const floatingEls = new Set();
+
+  function snapshotStyle(el) {
+    const s = {};
+    for (const p of FLOAT_STYLE_PROPS) s[p] = el.style[p];
+    return s;
+  }
+
+  // Must be called BEFORE this step's new transform/size is written, so the
+  // captured rect is always the true unscaled size the first time an
+  // element floats (otherwise scale would compound on itself).
+  function floatElement(el) {
+    if (floatMap.has(el)) return;
+    if (!el.parentNode) return;
+
+    const rect = el.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+
+    const placeholder = document.createElement(el.tagName);
+    placeholder.style.cssText = `width:${rect.width}px;height:${rect.height}px;visibility:hidden;`;
+    placeholder.setAttribute("data-hiz-placeholder", "1");
+    el.parentNode.insertBefore(placeholder, el);
+
+    const prevStyle = snapshotStyle(el);
+
+    ensureZoomLayer().appendChild(el);
+
+    el.style.position = "absolute";
+    el.style.margin = "0";
+    el.style.width = rect.width + "px";
+    el.style.height = rect.height + "px";
+    el.style.pointerEvents = "auto";
+
+    floatMap.set(el, {
+      placeholder,
+      prevStyle,
+      pageLeft: rect.left + window.scrollX,
+      pageTop: rect.top + window.scrollY,
+      width: rect.width,
+      height: rect.height,
+    });
+    floatingEls.add(el);
+    positionFloatingElement(el);
+  }
+
+  // Puts a floating element back at its locked original size/position —
+  // used to undo the "fill the page" fullscreen sizing while staying floated
+  // (e.g. still zoomed to some other scale) or as part of general repositioning.
+  function restoreFloatGeometry(el) {
+    const info = floatMap.get(el);
+    if (!info) return;
+    el.style.width = info.width + "px";
+    el.style.height = info.height + "px";
+    positionFloatingElement(el);
+  }
+
+  function positionFloatingElement(el) {
+    const info = floatMap.get(el);
+    if (!info) return;
+    const s = stateMap.get(el);
+    if (s && s.pageFull) return; // fullscreen elements stay pinned to the viewport, not the original scroll position
+    el.style.left = info.pageLeft - window.scrollX + "px";
+    el.style.top = info.pageTop - window.scrollY + "px";
+  }
+
+  function unfloatElement(el) {
+    const info = floatMap.get(el);
+    if (!info) return;
+    const { placeholder, prevStyle } = info;
+    if (placeholder && placeholder.parentNode) {
+      placeholder.parentNode.insertBefore(el, placeholder);
+      placeholder.remove();
+    }
+    for (const p of FLOAT_STYLE_PROPS) el.style[p] = prevStyle[p] || "";
+    floatMap.delete(el);
+    floatingEls.delete(el);
+  }
+
+  let repositionScheduled = false;
+  function scheduleReposition() {
+    if (repositionScheduled) return;
+    repositionScheduled = true;
+    requestAnimationFrame(() => {
+      repositionScheduled = false;
+      floatingEls.forEach(positionFloatingElement);
+    });
+  }
+  window.addEventListener("scroll", scheduleReposition, true);
+  window.addEventListener("resize", scheduleReposition);
+
   function applyState(el, s, originX, originY) {
-    if (originX !== undefined && originY !== undefined) {
-      el.style.transformOrigin = `${originX}% ${originY}%`;
-    } else if (!el.style.transformOrigin) {
-      el.style.transformOrigin = "50% 50%";
+    const shouldFloat = s.scale !== 1 || s.pageFull;
+
+    // Float/unfloat first, using whatever transform was in effect from the
+    // *previous* call — on the very first zoom step that's still "none", so
+    // the geometry locked in is always the true 100% size.
+    if (shouldFloat) {
+      floatElement(el);
+    } else {
+      unfloatElement(el);
     }
 
-    el.style.transform = s.scale === 1 ? "" : `scale(${s.scale})`;
-    el.style.imageRendering = s.nearest ? "pixelated" : "";
-
-    if (s.scale !== 1) {
-      if (el.dataset.hizOrigPosition === undefined) {
-        el.dataset.hizOrigPosition = el.style.position || "";
+    if (s.pageFull) {
+      if (el.dataset.hizPrevObjectFit === undefined) {
+        el.dataset.hizPrevObjectFit = el.style.objectFit || "";
       }
-      el.style.position = "relative";
-      el.style.zIndex = "2147483647";
-    } else if (el.dataset.hizOrigPosition !== undefined) {
-      el.style.position = el.dataset.hizOrigPosition;
-      delete el.dataset.hizOrigPosition;
-      el.style.zIndex = "";
+      el.style.left = "0px";
+      el.style.top = "0px";
+      el.style.width = "100%";
+      el.style.height = "100%";
+      el.style.objectFit = "contain";
+      el.style.transform = "none";
+      el.style.transformOrigin = "50% 50%";
+    } else {
+      if (el.dataset.hizPrevObjectFit !== undefined) {
+        el.style.objectFit = el.dataset.hizPrevObjectFit;
+        delete el.dataset.hizPrevObjectFit;
+      }
+      if (shouldFloat) restoreFloatGeometry(el);
+
+      if (originX !== undefined && originY !== undefined) {
+        el.style.transformOrigin = `${originX}% ${originY}%`;
+      } else if (!el.style.transformOrigin) {
+        el.style.transformOrigin = "50% 50%";
+      }
+      el.style.transform = s.scale === 1 ? "" : `scale(${s.scale})`;
     }
 
-    el.style.willChange = s.scale !== 1 ? "transform" : "";
+    el.style.imageRendering = s.nearest ? "pixelated" : "";
+    el.style.willChange = shouldFloat ? "transform" : "";
   }
 
   function getNaturalSize(el) {
@@ -208,6 +343,7 @@
     const el = hoveredEl;
     if (!el) return;
     const s = getState(el);
+    s.pageFull = false;
     s.scale = continuousDirection === "in" ? s.scale + STEP : s.scale - STEP;
     s.scale = Math.max(MIN_SCALE, round2(s.scale));
     const [ox, oy] = currentOrigin(el);
@@ -239,6 +375,7 @@
     const el = requireHoveredElement();
     if (!el) return;
     const s = getState(el);
+    s.pageFull = false;
     s.scale =
       direction === "in"
         ? Math.floor(s.scale) + 1
@@ -254,12 +391,18 @@
     const el = requireHoveredElement();
     if (!el) return;
     const natural = getNaturalSize(el);
-    if (!natural || !el.offsetWidth) {
+    if (!natural) {
       showToast("Hover Image Zoom: no native resolution for this element");
       return;
     }
     const s = getState(el);
-    s.scale = round2(natural[0] / el.offsetWidth);
+    s.pageFull = false;
+    // Use the locked layout width if already floating (the true 100%
+    // reference size), otherwise the current on-page width.
+    const info = floatMap.get(el);
+    const baseWidth = info ? info.width : el.offsetWidth;
+    if (!baseWidth) return;
+    s.scale = round2(natural[0] / baseWidth);
     const [ox, oy] = currentOrigin(el);
     applyState(el, s, ox, oy);
     showToast(`Native size: ${Math.round(s.scale * 100)}%`);
@@ -283,9 +426,22 @@
     if (!el) return;
     const s = getState(el);
     s.scale = 1;
+    s.pageFull = false;
     const [ox, oy] = currentOrigin(el);
     applyState(el, s, ox, oy);
     showToast("Reset to 100%");
+  }
+
+  // ---- Toggle "fill the page" fullscreen (in-page, not the OS Fullscreen API) ----
+  function togglePageFullscreen() {
+    console.log(LOG_PREFIX, comboLabel(hotkeys.pageFullscreen), "pressed");
+    const el = requireHoveredElement();
+    if (!el) return;
+    const s = getState(el);
+    s.pageFull = !s.pageFull;
+    const [ox, oy] = currentOrigin(el);
+    applyState(el, s, ox, oy);
+    showToast(s.pageFull ? "Page fullscreen: on" : "Page fullscreen: off");
   }
 
   function isEditableTarget(el) {
@@ -334,6 +490,11 @@
       if (comboMatches(e, hotkeys.resetSize)) {
         e.preventDefault();
         if (!e.repeat) resetSize();
+        return;
+      }
+      if (comboMatches(e, hotkeys.pageFullscreen)) {
+        e.preventDefault();
+        if (!e.repeat) togglePageFullscreen();
         return;
       }
     },

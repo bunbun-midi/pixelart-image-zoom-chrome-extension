@@ -7,6 +7,7 @@ const DEFAULT_HOTKEYS = {
   snapNative: { code: "KeyC", ctrl: false, alt: true, shift: false, meta: false },
   toggleNearest: { code: "KeyV", ctrl: false, alt: true, shift: false, meta: false },
   resetSize: { code: "KeyS", ctrl: false, alt: true, shift: false, meta: false },
+  pageFullscreen: { code: "KeyA", ctrl: false, alt: true, shift: false, meta: false },
 };
 
 const ACTIONS = [
@@ -17,6 +18,7 @@ const ACTIONS = [
   { id: "snapNative", label: "Snap to 100% native file resolution (images/video/canvas)" },
   { id: "toggleNearest", label: "Toggle nearest-neighbor (pixelated) scaling" },
   { id: "resetSize", label: "Reset to original (100%) size" },
+  { id: "pageFullscreen", label: "Toggle fill-the-page fullscreen (in-page)" },
 ];
 
 // Keys that can't be recorded as a standalone shortcut trigger — we wait for

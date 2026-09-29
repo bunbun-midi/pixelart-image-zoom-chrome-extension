@@ -7,6 +7,7 @@ const DEFAULT_HOTKEYS = {
   snapNative: { code: "KeyC", ctrl: false, alt: true, shift: false, meta: false },
   toggleNearest: { code: "KeyV", ctrl: false, alt: true, shift: false, meta: false },
   resetSize: { code: "KeyS", ctrl: false, alt: true, shift: false, meta: false },
+  pageFullscreen: { code: "KeyA", ctrl: false, alt: true, shift: false, meta: false },
 };
 
 const ACTIONS = [
@@ -17,6 +18,7 @@ const ACTIONS = [
   { id: "snapNative", label: "Snap to native size" },
   { id: "toggleNearest", label: "Toggle pixelated" },
   { id: "resetSize", label: "Reset to 100%" },
+  { id: "pageFullscreen", label: "Fill-page fullscreen" },
 ];
 
 function codeToLabel(code) {
